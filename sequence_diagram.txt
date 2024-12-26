@@ -1,0 +1,42 @@
+startuml
+actor User
+
+participant "Main Game Loop" as Loop
+participant "Player " as Player
+participant "Other Player" as OtherPlayer
+participant "OpenAI Client" as OpenAI
+participant "World" as World
+
+== Game Initialization ==
+User -> Loop: Start Game
+Loop -> Loop: Initialize Pygame and World
+Loop -> World: Load world data and player positions
+Loop -> Player: Load player data and conversation history
+
+== Main Game Loop ==
+User -> Loop: Input (Keyboard/Mouse)
+Loop -> Player: Update Player State (Move/Interact)
+Loop -> Loop: Check Proximity to Other Players
+
+alt Near Another Player
+    Player -> OtherPlayer: Initiate Conversation
+    Player -> OpenAI: Generate Response
+    OpenAI -> Player: Return Response
+    Player -> Player: Update Conversation Log
+    Player -> Loop: Move Away from Other Player
+end
+
+alt Not Near Another Player
+    Loop -> Player: Random Move (Inactive Players)
+end
+
+== Render and Update ==
+Loop -> Loop: Render World and UI
+alt Game Paused
+    Loop -> User: Accept Input for Player Stats/Bio
+else Game Running
+    Loop -> World: Update Player Positions
+end
+
+User -> Loop: Save and Exit Game (Optional)
+@enduml
