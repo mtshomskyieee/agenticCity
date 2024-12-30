@@ -1,5 +1,6 @@
 # Details
-https://medium.com/p/3015a4aec782
+- "Vanilla LLM"   https://medium.com/p/3015a4aec782
+- CrewAI          https://medium.com/@mtshomsky/using-agents-to-breathe-life-into-npcs-using-crewai-5e3a71a49e7a
 
 # Author Request
 - If using in a paper/writeup/publication, please credit the Author and github repo
