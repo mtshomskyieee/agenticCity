@@ -30,7 +30,7 @@ GRID_SIZE = 10
 CELL_SIZE = 40
 WIDTH, HEIGHT = GRID_SIZE * CELL_SIZE * 2, GRID_SIZE * CELL_SIZE
 FPS = 30
-NUM_PLAYERS = 3  # Number of players in the game
+MAX_PLAYERS = 5  # Maximum number of players supported
 SCROLL_SPEED = 5
 RESPONSE_BOX_HEIGHT = 100
 
