@@ -1,13 +1,13 @@
-grass,grass,grass,grass,rock,grass,grass,water,grass,grass
-grass,grass,grass,grass,water,grass,rock,grass,water,grass
-grass,water,grass,grass,grass,grass,grass,grass,water,water
-water,grass,grass,grass,rock,grass,grass,grass,grass,grass
-grass,grass,grass,grass,grass,grass,grass,grass,water,water
-grass,grass,grass,grass,grass,water,water,grass,rock,water
-grass,grass,water,grass,grass,grass,grass,rock,grass,grass
-water,water,grass,water,grass,grass,grass,grass,grass,rock
-water,grass,grass,grass,grass,grass,grass,water,water,water
-water,grass,grass,grass,grass,water,grass,grass,rock,grass
-player,Carly Cummings,5,5,100,100,100,Computer Scientist,New Task: Design scalable machine learning model.
-player,Katherine Jones,2,1,100,100,100,Computer Engineer,Create a half adder
-player,Ashley Brown,5,7,100,100,100,Electrical Engineer who loves CPUs,Design a CPU logic circuit.
+kitchen_oven,kitchen_sink,kitchen_counter,kitchen_counter,rock,rock,rock,rock,rock,rock
+kitchen_counter,forks,grass,box_with_kitchen_goods,rock,rock,rock,grass,grass,rock
+kitchen_counter,grass,box_with_kitchen_goods,grass,rock,rock,grass,grass,grass,rock
+kitchen_counter,grass,water,grass,book,grass,grass,grass,grass,rock
+rock,rock,rock,grass,grass,grass,grass,grass,grass,rock
+rock,rock,rock,grass,grass,grass,grass,grass,rock,rock
+rock,grass,grass,grass,grass,grass,grass,rock,grass,rock
+rock,grass,grass,grass,grass,grass,grass,grass,grass,rock
+rock,grass,grass,grass,grass,grass,grass,grass,grass,rock
+rock,rock,rock,rock,rock,rock,rock,rock,rock,rock
+player,Carly Cummings,1,2,100,100,100,mover,Load boxes onto moving truck,None
+player,Katherine Jones,3,2,100,100,100,mover,Label boxes with destination room,None
+player,Ashley Brown,8,6,100,100,100,mover,Unpack and organize kitchen items,None
