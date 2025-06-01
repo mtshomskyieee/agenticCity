@@ -11,6 +11,8 @@ import emoji
 from crewai_tools import tool
 import requests
 from io import BytesIO
+import json
+from datetime import datetime
 
 ## Locally set the openai key
 #os.environ["OPENAI_API_KEY"] = "<add your key here>"
@@ -356,6 +358,39 @@ def save_world_to_csv(filename, world, players):
             writer.writerow(['player', player.name, player.x, player.y, player.stats['Health'],
                              player.stats['Speed'], player.stats['Strength'], player.bio,
                              player.tasks, inventory_item])
+    
+    # Now also save to history.json
+    history_data = []
+    if os.path.exists('history.json'):
+        try:
+            with open('history.json', 'r') as f:
+                history_data = json.load(f)
+        except json.JSONDecodeError:
+            history_data = []
+    
+    # Create new state entry
+    current_state = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'data': []
+    }
+    
+    # Add world data
+    for row in world:
+        current_state['data'].append(row)
+    
+    # Add player data
+    for player in players:
+        inventory_item = player.inventory if player.inventory is not None else "None"
+        current_state['data'].append(['player', player.name, player.x, player.y, player.stats['Health'],
+                                    player.stats['Speed'], player.stats['Strength'], player.bio,
+                                    player.tasks, inventory_item])
+    
+    # Append to history
+    history_data.append(current_state)
+    
+    # Save updated history
+    with open('history.json', 'w') as f:
+        json.dump(history_data, f, indent=2)
 
 
 def generate_unique_position(existing_positions):
@@ -439,8 +474,15 @@ def llm_request(conversation_list, request_string):
 # Define tools that allow for map interactions
 @tool("pickup_map_item")
 def pickup_map_item(q:str) -> str:
-    # Allow current player to pickup an item in place
-
+    """
+    Allow current player to pickup an item in place.
+    
+    Args:
+        q (str): The name of the player who wants to pick up the item.
+        
+    Returns:
+        str: A message indicating what item was picked up, or None if pickup failed.
+    """
     print(f"\n\n\n\n------------------------------------- {q}")
     found_player = None
     lookup_player = to_upper_and_remove_spaces(q)
@@ -456,8 +498,15 @@ def pickup_map_item(q:str) -> str:
 
 @tool("drop_map_item")
 def drop_map_item(q:str) -> str:
-    # Allow current player to drop an item in place
-
+    """
+    Allow current player to drop an item in place.
+    
+    Args:
+        q (str): The name of the player who wants to drop the item.
+        
+    Returns:
+        str: A message indicating what item was dropped, or None if drop failed.
+    """
     found_player = None
     lookup_player = to_upper_and_remove_spaces(q)
     if (player_lookup.get(lookup_player)):
@@ -470,6 +519,64 @@ def drop_map_item(q:str) -> str:
         item = found_player.place_inplace()
         return f"dropped the item {item}"
 
+
+def get_neighboring_squares(player, world_map):
+    """Get all neighboring squares including next nearest neighbors."""
+    neighbors = []
+    # Check all squares in a 3x3 grid centered on the player
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            new_x = player.x + dx
+            new_y = player.y + dy
+            # Skip if out of bounds
+            if 0 <= new_x < GRID_SIZE and 0 <= new_y < GRID_SIZE:
+                # Skip the center square (player's current position)
+                if dx == 0 and dy == 0:
+                    continue
+                # Add direction and content
+                direction = ""
+                if dx == -1: direction += "North"
+                if dx == 1: direction += "South"
+                if dy == -1: direction += "West"
+                if dy == 1: direction += "East"
+                if not direction: direction = "Center"
+                
+                # Check if square is occupied by another player
+                occupied_by = None
+                for p in players:
+                    if p.x == new_x and p.y == new_y:
+                        occupied_by = p.name
+                        break
+                
+                neighbors.append({
+                    "direction": direction,
+                    "content": world_map[new_x][new_y],
+                    "occupied_by": occupied_by,
+                    "dx": dx,
+                    "dy": dy
+                })
+    return neighbors
+
+@tool("decide_movement")
+def decide_movement(q: str) -> str:
+    """
+    Decide which direction to move based on neighboring squares.
+    
+    Args:
+        q (str): The name of the player who wants to move.
+        
+    Returns:
+        str: A message indicating the movement decision.
+    """
+    found_player = None
+    lookup_player = to_upper_and_remove_spaces(q)
+    if player_lookup.get(lookup_player):
+        found_player = player_lookup.get(lookup_player)
+    if not found_player:
+        return f"Could not find Player named {q}"
+    
+    neighbors = get_neighboring_squares(found_player, found_player.world_obj)
+    return json.dumps({"neighbors": neighbors, "current_task": found_player.tasks})
 
 def llm_request_crewai(
         conversation_list,
@@ -745,6 +852,7 @@ class Button:
 # Button setup
 button_width, button_height = 120, 40
 pause_button = Button(WIDTH - button_width - 10, HEIGHT - button_height - 10, button_width, button_height, "Pause")
+autonomy_button = Button(WIDTH - button_width - 10, HEIGHT - (button_height * 2) - 20, button_width, button_height, "autonomy")
 
 
 class Player:
@@ -778,12 +886,12 @@ class Player:
             print(f"Error: {self.name} is already holding {self.inventory}")
             return None
         try:
-            current_item = self.world_obj[self.y][self.x]
+            current_item = self.world_obj[self.x][self.y]
             if current_item == 'grass' or current_item == 'rock':
                 print(f"Error: {self.name} cannot pick up {current_item}")
                 return None
             self.inventory = current_item
-            self.world_obj[self.y][self.x] = 'grass'
+            self.world_obj[self.x][self.y] = 'grass'
             print(f"Success: {self.name} picked up {current_item}")
             return current_item
         except Exception as e:
@@ -803,12 +911,12 @@ class Player:
             print(f"Error: {self.name} has no item to place")
             return None
         try:
-            current_spot = self.world_obj[self.y][self.x]
+            current_spot = self.world_obj[self.x][self.y]  # Fixed coordinate order to match world.csv layout
             if current_spot != 'grass':
                 print(f"Error: {self.name} cannot place item on {current_spot}")
                 return None
             item_to_place = self.inventory
-            self.world_obj[self.y][self.x] = self.inventory
+            self.world_obj[self.x][self.y] = self.inventory  # Fixed coordinate order to match world.csv layout
             self.inventory = None
             print(f"Success: {self.name} placed {item_to_place}")
             return item_to_place
@@ -880,27 +988,160 @@ if os.path.exists(world_filename):
 else:
     world = generate_world(GRID_SIZE)
     # Initialize players with unique positions
-    players = []
     existing_positions = set()
-    for i in range(NUM_PLAYERS):
+    # Use a default of 3 players when creating a new world
+    num_new_players = 3
+    for i in range(num_new_players):
         x, y = generate_unique_position(existing_positions)
         existing_positions.add((x, y))
         player = Player(x, y, player_imgs[i])
-        player.world_obj = world  # Set the world reference
+        player.world_obj = world
         players.append(player)
 
     save_world_to_csv(world_filename, world, players)
 
-active_player_idx = random.randint(0, NUM_PLAYERS - 1)
+# Set active_player_idx based on actual number of players
+num_players = len(players)
+if num_players == 0:
+    print("Error: No players found in world.csv")
+    pygame.quit()
+    exit()
+active_player_idx = random.randint(0, num_players - 1)
 
+
+def handle_map_interactions(player):
+    """Handle map interactions after a player moves to a new position."""
+    # Get surrounding squares information
+    neighbors = get_neighboring_squares(player, player.world_obj)
+    
+    # Create map observation entry
+    map_observation = f"MAP: At ({player.x}, {player.y}). "
+    if player.inventory:
+        map_observation += f"Holding {player.inventory}. "
+    current_tile = player.world_obj[player.x][player.y]
+    map_observation += f"Current tile: {current_tile}. Surroundings: "
+    
+    # Add information about each neighboring square
+    for neighbor in neighbors:
+        map_observation += f"{neighbor['direction']}: {neighbor['content']}"
+        if neighbor['occupied_by']:
+            map_observation += f"(occupied by {neighbor['occupied_by']})"
+        map_observation += ", "
+    
+    # Add the map observation to player's conversation history
+    player.all_responses.append(map_observation)
+    
+    # Create prompt for CrewAI
+    prompt = f"{player.who_am_i_string()} {map_observation}"
+
+    # Use CrewAI to make decisions about picking up or dropping items
+    response = llm_request_crewai(
+        player.all_responses,
+        prompt,
+        player
+    )
+    
+    # Add the interaction result to the player's responses
+    player.all_responses.append(response)
+    return response
 
 def move_player(player, dx, dy):
     new_x, new_y = player.x + dx, player.y + dy
     if 0 <= new_x < GRID_SIZE and 0 <= new_y < GRID_SIZE and world[new_x][new_y] != 'rock':
         # Check if the new position is occupied by another player
         if not any(p.x == new_x and p.y == new_y for p in players):
+            old_x, old_y = player.x, player.y
             player.x, player.y = new_x, new_y
+            
+            # Only trigger map interactions if the player actually moved
+            if old_x != new_x or old_y != new_y:
+                handle_map_interactions(player)
+                return True  # Indicate successful movement
+    return False  # Indicate failed movement
 
+def decide_next_move(player):
+    # Use CrewAI to decide the next move for a player.
+    llm = LLM(model="gpt-4o", temperature=0.7, api_key=os.environ["OPENAI_API_KEY"])
+
+    # Get recent map history
+    map_history = []
+    for response in player.all_responses[-50:]:  # Look at last 50 responses
+        if response.startswith("MAP:"):
+            map_history.append(response)
+
+    movement_agent = Agent(
+        role="MovementAgent",
+        goal=f"decide where to move next based on surroundings and current task",
+        backstory=f"I analyze the surroundings and make movement decisions based on the current task: {player.tasks}. "
+                 f"I must return movement decisions in JSON format with dx and dy values. "
+                 f"Recent map history:\n" + "\n".join(map_history),
+        llm=llm,
+        memory=True,
+        verbose=True,
+        tools=[decide_movement]
+    )
+
+    movement_task = Task(
+        description=(
+            f"Analyze surroundings and decide where to move. You are {player.name}.\n"
+            f"Use the decide_movement tool with your name as the argument to get information about neighboring squares.\n"
+            f"Based on the response and your map history, determine the best direction to move considering your current task.\n\n"
+            f"Map History (use this to make informed decisions about where to explore or return to):\n"
+            f"{chr(10).join(map_history)}\n\n"
+            f"Context: Moving towards task completion: {player.tasks}\n\n"
+            "IMPORTANT: You must format your final answer as a JSON string with the following structure:\n"
+            "{\n"
+            '    "dx": <number between -1 and 1>,\n'
+            '    "dy": <number between -1 and 1>,\n'
+            '    "reason": "explanation for the movement"\n'
+            "}\n\n"
+            "For example:\n"
+            "{\n"
+            '    "dx": -1,\n'
+            '    "dy": 1,\n'
+            '    "reason": "Moving northeast towards the target location"\n'
+            "}"
+        ),
+        expected_output="A JSON string containing dx, dy values and a reason for the movement.",
+        tools=[decide_movement],
+        agent=movement_agent
+    )
+
+    crew = Crew(
+        agents=[movement_agent],
+        tasks=[movement_task],
+        process=Process.sequential,
+        verbose=True
+    )
+
+    result = crew.kickoff()
+    
+    # Parse the movement decision and execute it
+    try:
+        # Try to find a JSON string in the response
+        response_text = result.raw
+        # Look for JSON-like structure in the response
+        start_idx = response_text.find('{')
+        end_idx = response_text.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1:
+            json_str = response_text[start_idx:end_idx + 1]
+            decision = json.loads(json_str)
+            
+            if "dx" in decision and "dy" in decision:
+                dx = int(decision["dx"])
+                dy = int(decision["dy"])
+                # Ensure we only move one unit at a time
+                dx = max(min(dx, 1), -1)
+                dy = max(min(dy, 1), -1)
+                if "reason" in decision:
+                    print(f"Moving {player.name}: {decision['reason']}")
+                return move_player(player, dx, dy)
+        raise ValueError("No valid movement decision found in response")
+    except Exception as e:
+        print(f"Error processing movement decision: {str(e)}")
+        print(f"Raw response: {response_text}")
+        return False
 
 def move_away(player, other_player):
     directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
@@ -926,8 +1167,8 @@ def move_inactive_players(players, active_idx):
                 move_away(player, nearby_player)
                 move_away(nearby_player, player)
             else:
-                dx, dy = random.choice([(0, 1), (1, 0), (0, -1), (-1, 0)])
-                move_player(player, dx, dy)
+                # Use the new AI-driven movement system
+                decide_next_move(player)
 
 
 def draw_world(surface, world, players):
@@ -1067,6 +1308,7 @@ idle_mod = 20 % sub_epoch  # update cycle for idle things
 idle_count = 0
 running = True
 paused = True
+is_autonomous = False  # Track if player is in autonomous mode
 selected_player = players[active_player_idx]
 
 # Create input boxes for player attributes
@@ -1080,22 +1322,60 @@ tasks_box = InputBox(GRID_SIZE * CELL_SIZE + 20, 50, 300, 32, selected_player.ta
 #input_boxes = stat_boxes + [bio_box, tasks_box]
 input_boxes = [bio_box, tasks_box]
 
+def save_history(world, players):
+    # Load existing history
+    history_data = []
+    if os.path.exists('history.json'):
+        try:
+            with open('history.json', 'r') as f:
+                history_data = json.load(f)
+        except json.JSONDecodeError:
+            history_data = []
+    
+    # Create new state entry
+    current_state = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'data': []
+    }
+    
+    # Add world data
+    for row in world:
+        current_state['data'].append(row)
+    
+    # Add player data
+    for player in players:
+        inventory_item = player.inventory if player.inventory is not None else "None"
+        current_state['data'].append(['player', player.name, player.x, player.y, player.stats['Health'],
+                                    player.stats['Speed'], player.stats['Strength'], player.bio,
+                                    player.tasks, inventory_item])
+    
+    # Append to history
+    history_data.append(current_state)
+    
+    # Save updated history
+    with open('history.json', 'w') as f:
+        json.dump(history_data, f, indent=2)
+
 while running:
     idle_count = (idle_count + 1) % sub_epoch
+    
+    # Save history at the start of each loop iteration
+    save_history(world, players)
+    
     for event in pygame.event.get():
         if pause_button.is_clicked(event):
             paused = not paused
             pause_button.text = "Unpause" if paused else "Pause"
             save_world_to_csv(world_filename, world, players)
+        if autonomy_button.is_clicked(event):
+            is_autonomous = not is_autonomous
+            autonomy_button.text = "user ctrl" if is_autonomous else "autonomy"
         if event.type == pygame.QUIT:
             save_world_to_csv(world_filename, world, players)
             for player in players:
                 save_conversation_history(player)
             save_global_conversations()
             running = False
-        # elif event.type == pygame.KEYDOWN:
-        #     if event.key == pygame.K_p and not any(box.enter_pressed for box in input_boxes):
-        #         paused = not paused
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_x, mouse_y = event.pos
             clicked_player_idx = get_player_at_pos(players, mouse_x, mouse_y)
@@ -1113,15 +1393,21 @@ while running:
 
     # Process other game logic only if not paused
     if not paused:
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_UP]:
-            move_player(players[active_player_idx], -1, 0)
-        if keys[pygame.K_DOWN]:
-            move_player(players[active_player_idx], 1, 0)
-        if keys[pygame.K_LEFT]:
-            move_player(players[active_player_idx], 0, -1)
-        if keys[pygame.K_RIGHT]:
-            move_player(players[active_player_idx], 0, 1)
+        if is_autonomous:
+            # Autonomous movement - move player based on their tasks
+            if idle_count % idle_mod == 0:
+                move_inactive_players([players[active_player_idx]], -1)  # -1 means no active player to avoid
+        else:
+            # Manual keyboard control
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_UP]:
+                move_player(players[active_player_idx], -1, 0)
+            if keys[pygame.K_DOWN]:
+                move_player(players[active_player_idx], 1, 0)
+            if keys[pygame.K_LEFT]:
+                move_player(players[active_player_idx], 0, -1)
+            if keys[pygame.K_RIGHT]:
+                move_player(players[active_player_idx], 0, 1)
 
         if idle_count % idle_mod == 0:
             move_inactive_players(players, active_player_idx)
@@ -1156,6 +1442,7 @@ while running:
 
     # Draw the pause/unpause button
     pause_button.draw(screen)
+    autonomy_button.draw(screen)
 
     # Draw chatting notification if chatting is enabled
     if is_chatting:
