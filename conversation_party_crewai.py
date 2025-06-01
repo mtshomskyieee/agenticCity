@@ -3,9 +3,14 @@ import random
 import os
 import csv
 from faker import Faker
+from PIL import Image, ImageDraw, ImageFont
 import openai
 from openai import OpenAI
 from crewai import Agent, Task, Crew, LLM, Process
+import emoji
+from crewai_tools import tool
+import requests
+from io import BytesIO
 
 ## Locally set the openai key
 #os.environ["OPENAI_API_KEY"] = "<add your key here>"
@@ -36,19 +41,288 @@ WRAPPED_LINES = ""
 # Global variable to track chatting state
 is_chatting = False
 
+# Add these imports at the top of the file if they're not already there
+import os
+from PIL import Image
+import requests
+from io import BytesIO
+from openai import OpenAI
 
-# Function to load and resize images
-def load_image(filename, size):
-    image = pygame.image.load(filename)
-    return pygame.transform.scale(image, size)
+
+def ensure_asset_exists(asset_name: str, assets_dir: str) -> str:
+    # Checks if an asset exists, if not generates it using OpenAI.
+    # Returns the path to the asset.
+
+    # Remove 'assets/' from the start of asset_name if it exists
+    if asset_name.startswith('assets/'):
+        asset_name = asset_name[7:]  # Remove 'assets/' prefix
+        
+    # Create full path
+    asset_path = os.path.join(assets_dir, asset_name)
+    
+    # Create assets directory if it doesn't exist
+    os.makedirs(assets_dir, exist_ok=True)
+    
+    # If asset already exists, return its path
+    if os.path.exists(asset_path):
+        return asset_path
+        
+    # If asset doesn't exist, generate it
+    try:
+        client = OpenAI()
+        
+        # Generate image using DALL-E
+        response = client.images.generate(
+            model="dall-e-3",  # Use DALL-E 3 for better quality
+            prompt=f"Create a simple pixel art style icon for {asset_name.split('.')[0]}. The image should be minimal and clear, suitable for a 31x39 pixel game asset.",
+            size="1024x1024",  # We'll resize it later
+            n=1,
+        )
+        
+        # Download the generated image
+        image_url = response.data[0].url
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content))
+        
+        # Resize to 31x39 pixels
+        img = img.resize((31, 39), Image.Resampling.LANCZOS)
+        
+        # Save the image
+        img.save(asset_path)
+        return asset_path
+        
+    except Exception as e:
+        print(f"Failed to generate image for {asset_name}: {str(e)}")
+        return None
+
+
+def load_image(filename: str, size=(31,39)) -> pygame.Surface:
+    # Load an image from the assets directory.
+    try:
+        # Remove 'assets/' from the start of filename if it exists
+        if filename.startswith('assets/'):
+            filename = filename[7:]  # Remove 'assets/' prefix
+            
+        # Create full path
+        asset_path = os.path.join(assets_dir, filename)
+        
+        # Create assets directory if it doesn't exist
+        os.makedirs(assets_dir, exist_ok=True)
+        
+        # If asset already exists, load it directly
+        if os.path.exists(asset_path):
+            image = pygame.image.load(asset_path)
+            return pygame.transform.scale(image, size)
+            
+        # If asset doesn't exist, generate it
+        try:
+            client = OpenAI()  # Make sure OPENAI_API_KEY is set in environment variables
+            
+            # Generate image using DALL-E
+            response = client.images.generate(
+                model="dall-e-3",  # Use DALL-E 3 for better quality
+                prompt=f"Create a simple pixel art style icon for {filename.split('.')[0]}. The image should be minimal and clear, suitable for a {size[0]}x{size[1]} pixel game asset.",
+                size="1024x1024",  # We'll resize it later
+                n=1,
+            )
+            
+            # Download the generated image
+            image_url = response.data[0].url
+            response = requests.get(image_url)
+            img = Image.open(BytesIO(response.content))
+            
+            # Resize to target size
+            img = img.resize(size, Image.Resampling.LANCZOS)
+            
+            # Save the image
+            img.save(asset_path)
+            
+            # Convert to pygame surface and return
+            return pil_to_pygame(img)
+            
+        except Exception as e:
+            print(f"Failed to generate image for {filename}: {str(e)}")
+            # Create a default surface with magenta color to indicate missing texture
+            surface = pygame.Surface(size)
+            surface.fill((255, 0, 255))  # Magenta
+            return surface
+            
+    except Exception as e:
+        print(f"Error loading image {filename}: {str(e)}")
+        # Create a default surface with magenta color to indicate missing texture
+        # If you're getting magenta surfaces it could be you cannot produce images with your OpenAI key
+        surface = pygame.Surface(size)
+        surface.fill((255, 0, 255))  # Magenta
+        return surface
 
 
 # Load and resize images
 assets_dir = 'assets'
-grass_img = load_image(os.path.join(assets_dir, 'grass.png'), (CELL_SIZE, CELL_SIZE))
-rock_img = load_image(os.path.join(assets_dir, 'rock.png'), (CELL_SIZE, CELL_SIZE))
-water_img = load_image(os.path.join(assets_dir, 'water.png'), (CELL_SIZE, CELL_SIZE))
-player_imgs = [load_image(os.path.join(assets_dir, f'player_{i}.png'), (CELL_SIZE, CELL_SIZE)) for i in range(5)]
+grass_img = load_image('grass.png', (CELL_SIZE, CELL_SIZE))
+rock_img = load_image('rock.png', (CELL_SIZE, CELL_SIZE))
+water_img = load_image('water.png', (CELL_SIZE, CELL_SIZE))
+player_imgs = [load_image(f'player_{i}.png', (CELL_SIZE, CELL_SIZE)) for i in range(5)]
+
+
+def pil_to_pygame(pil_image: Image.Image) -> pygame.Surface:
+    # Convert a PIL Image to a Pygame Surface.
+
+    # Ensure the image is in RGBA mode.
+    pil_image = pil_image.convert("RGBA")
+    mode = pil_image.mode
+    size = pil_image.size
+    data = pil_image.tobytes()
+    return pygame.image.fromstring(data, size, mode)
+
+def generate_emoji_image(emoji_name: str) -> Image.Image:
+    """
+    Generates a 40x40 image with an emoji based on the name provided.
+
+    Args:
+        emoji_name (str): The name of the emoji ('truck', 'car', etc.)
+
+    Returns:
+        PIL.Image.Image: An image of size 40x40 with the emoji drawn in the center.
+    """
+    # Define a simple mapping from emoji names to actual emoji characters.
+    emoji_map = {
+        # Transport
+        "truck": "🚚",
+        "car": "🚗",
+        "taxi": "🚕",
+        "bus": "🚌",
+        "bicycle": "🚲",
+        "motorbike": "🏍️",
+        "airplane": "✈️",
+        "ship": "🚢",
+        "rocket": "🚀",
+
+        # Faces and Emotions
+        "smile": "😊",
+        "grin": "😁",
+        "wink": "😉",
+        "laugh": "😂",
+        "sad": "😢",
+        "angry": "😠",
+        "surprised": "😮",
+        "cool": "😎",
+
+        # Animals
+        "dog": "🐶",
+        "cat": "🐱",
+        "mouse": "🐭",
+        "hamster": "🐹",
+        "rabbit": "🐰",
+        "frog": "🐸",
+        "tiger": "🐯",
+        "bear": "🐻",
+        "panda": "🐼",
+
+        # Food and Drinks
+        "food": "🍕",
+        "apple": "🍎",
+        "banana": "🍌",
+        "cherries": "🍒",
+        "strawberry": "🍓",
+        "watermelon": "🍉",
+        "burger": "🍔",
+        "pizza": "🍕",
+        "coffee": "☕",
+        "cake": "🍰",
+
+        # Nature and Weather
+        "sun": "☀️",
+        "moon": "🌙",
+        "star": "⭐",
+        "cloud": "☁️",
+        "rain": "🌧️",
+        "snow": "❄️",
+        "thunder": "⚡",
+        "leaf": "🍃",
+        "flower": "🌸",
+
+        # Objects
+        "heart": "❤️",
+        "gift": "🎁",
+        "balloon": "🎈",
+        "phone": "📱",
+        "computer": "💻",
+        "camera": "📷",
+        "watch": "⌚",
+        "key": "🔑",
+
+        # Activities
+        "soccer": "⚽",
+        "basketball": "🏀",
+        "baseball": "⚾",
+        "guitar": "🎸",
+        "microphone": "🎤",
+        "gamepad": "🎮",
+    }
+
+    if emoji_name not in emoji_map:
+        print(f"Emoji '{emoji_name}' not recognized. Using Gift")
+        emoji_name = "gift" #Default to gift
+
+    emoji_char = emoji_map.get(emoji_name)
+    if not emoji_char:
+        emoji_char = emoji.emojize(f":{emoji_name}:")
+
+    emoji_char = emoji.emojize(f":{emoji_name}:")
+
+    # Create a new 40x40 white image.
+    img_size = (40, 40)
+    image = Image.new("RGBA", img_size, "white")
+    draw = ImageDraw.Draw(image)
+
+    # Load a font that supports emojis. On some systems, you might need to supply a TTF file path.
+    # We try the default PIL font as a fallback, but note: it might not support color emoji.
+    font = None
+    try:
+        # Attempt to load a common emoji-supporting font if available.
+        # For example, on Windows you might have "seguiemj.ttf" (Segoe UI Emoji) in C:\Windows\Fonts.
+        emoji_font_path = None
+        if os.name == "nt":
+            potential_path = r"C:\Windows\Fonts\seguiemj.ttf"
+            if os.path.exists(potential_path):
+                emoji_font_path = potential_path
+        else:
+            # On many Linux systems, you can try "NotoColorEmoji.ttf"
+            potential_path = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+            if os.path.exists(potential_path):
+                emoji_font_path = potential_path
+
+        if emoji_font_path:
+            font = ImageFont.truetype(emoji_font_path, 32)
+        else:
+            # Fallback to the default font (which might not render emoji properly)
+            font = ImageFont.load_default()
+    except Exception as e:
+        font = ImageFont.load_default()
+
+    # Get text size for centering the emoji
+    bbox = draw.textbbox((0, 0), emoji_char, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # Calculate position to center the emoji in the image.
+    x = (img_size[0] - text_width) / 2
+    y = (img_size[1] - text_height) / 2
+
+    # Draw the emoji
+    draw.text((x, y), emoji_char, font=font, fill="black")
+
+    return image
+
+# scrub strings for lookups
+def to_upper_and_remove_spaces(input_string):
+    # Convert to uppercase
+    upper_string = input_string.upper()
+    # Remove spaces
+    result_string = upper_string.replace(" ", "")
+    return result_string
+
+
 
 
 # Create a 2D array for the world or load from CSV
@@ -75,10 +349,13 @@ def save_world_to_csv(filename, world, players):
         writer = csv.writer(file)
         for row in world:
             writer.writerow(row)
-        # Save player positions, names, bios, and tasks
+        # Save player positions, names, bios, tasks, and inventory
         for player in players:
-            writer.writerow(['player', player.name, player.x, player.y, player.stats['Health'], player.stats['Speed'],
-                             player.stats['Strength'], player.bio, player.tasks])
+            # Adding inventory to the saved data
+            inventory_item = player.inventory if player.inventory is not None else "None"
+            writer.writerow(['player', player.name, player.x, player.y, player.stats['Health'],
+                             player.stats['Speed'], player.stats['Strength'], player.bio,
+                             player.tasks, inventory_item])
 
 
 def generate_unique_position(existing_positions):
@@ -110,7 +387,12 @@ def load_conversation_history(player):
 
 def save_global_conversations():
     filename = os.path.join(conversation_dir, 'global_conversation.txt')
-    with open(filename, 'w') as file:
+
+    # Make sure the directory exists
+    os.makedirs(conversation_dir, exist_ok=True)
+
+    # Open file in append mode to create if not exists and append if it does
+    with open(filename, 'a') as file:
         for entry in global_conversation_log:
             file.write(entry + "\n")
 
@@ -154,6 +436,40 @@ def llm_request(conversation_list, request_string):
         # Handle errors appropriately
         return f"An error occurred: {str(e)}"
 
+# Define tools that allow for map interactions
+@tool("pickup_map_item")
+def pickup_map_item(q:str) -> str:
+    # Allow current player to pickup an item in place
+
+    print(f"\n\n\n\n------------------------------------- {q}")
+    found_player = None
+    lookup_player = to_upper_and_remove_spaces(q)
+    if (player_lookup.get(lookup_player)):
+        found_player = player_lookup.get(lookup_player)
+    if not found_player:
+        print(f"\n\n\n\n------------------------------------- Could not find Player named {q}")
+        return
+    else:
+        print(f"\n\n\n\n------------------------------------- PLAYER PICKED UP ITEM {q}")
+        item = found_player.pick_up_inplace()
+        return f"picked up the item {item}"
+
+@tool("drop_map_item")
+def drop_map_item(q:str) -> str:
+    # Allow current player to drop an item in place
+
+    found_player = None
+    lookup_player = to_upper_and_remove_spaces(q)
+    if (player_lookup.get(lookup_player)):
+        found_player = player_lookup.get(lookup_player)
+    if not found_player:
+        print(f"\n\n\n\n------------------------------------- Could not find Player named {q}")
+        return
+    else:
+        print(f"\n\n\n\n------------------------------------- PLAYER DROPPED ITEM {q}")
+        item = found_player.place_inplace()
+        return f"dropped the item {item}"
+
 
 def llm_request_crewai(
         conversation_list,
@@ -179,6 +495,7 @@ def llm_request_crewai(
     ]
     tasks = str(player_obj.tasks)
     my_bio = str(player_obj.bio)
+    current_player_name = str(player_obj.name)
 
     llm = LLM(model="gpt-4o", temperature=0.7, api_key=os.environ["OPENAI_API_KEY"])
 
@@ -213,6 +530,58 @@ def llm_request_crewai(
         agent=ontask_agent,
     )
 
+    map_pickup_interaction_agent = Agent(
+        role="interact with the map",
+        goal=f"decide whether or not to pickup the current map item based on my goal, if I want to pick it up say my name",
+        backstory=f"{prompt}, to accomplish this, is the current map item something I should pickup and place "
+                  f"Your name is {current_player_name} ",
+        llm=llm,
+        memory=True,
+        verbose=True,
+        context=[
+            f"Role: Map interaction agent",
+            f"Name: {current_player_name}",
+            f"Tool Usage: Use pickup_map_item tool with argument '{current_player_name}'"
+        ]
+    )
+
+    map_pickup_interaction_task = Task(
+        description=f"""
+        Decide whether to pickup the current map item. You are {current_player_name}.
+        If you want to pick up the item, use the pickup_map_item tool with your name as the argument.
+        Context: {prompt}
+        """,
+        expected_output="A decision about picking up the item and the result of using the tool if appropriate.",
+        tools=[pickup_map_item],
+        agent=map_pickup_interaction_agent
+    )
+
+    map_drop_interaction_agent = Agent(
+        role="interact with the map",
+        goal=f"decide whether or not to drop the current map item, if I want to drop it say my name",
+        backstory=f"{prompt}, to accomplish this, is the current map item something I should drop and place. "
+                  f"Your name is {current_player_name} ",
+        llm=llm,
+        memory=True,
+        verbose=True,
+        context=[
+            f"Role: Map interaction agent",
+            f"Name: {current_player_name}",
+            f"Tool Usage: Use drop_map_item tool with argument '{current_player_name}'"
+        ]
+    )
+
+    map_drop_interaction_task = Task(
+        description=f"""
+        Decide whether to drop the current inventory item. You are {current_player_name}.
+        If you want to drop the item, use the drop_map_item tool with your name as the argument.
+        Context: {prompt}
+        """,
+        expected_output="A decision about dropping the item and the result of using the tool if appropriate.",
+        tools=[drop_map_item],
+        agent=map_drop_interaction_agent
+    )
+
     completedtask_agent = Agent(
         role="CompletedTaskAgent",
         goal=f"if my task completed {tasks}, say that is completed",
@@ -242,7 +611,7 @@ def llm_request_crewai(
 
     createtask_task = Task(
         description="Generate a new task",
-        expected_output=f"I have finished my task {tasks}, generate a new one",
+        expected_output=f"I have finished my task {tasks}, generate a new one in plaintext with no commas.",
         agent=createtask_agent,
     )
 
@@ -272,15 +641,17 @@ def llm_request_crewai(
 
     uniqueness_task = Task(
         description="Start player conversation",
-        expected_output="A unique response to the question using the history of the user.",
+        expected_output="A unique response to the question using the history of the user in plaintext with no commas",
         agent=uniqueness_agent,
     )
 
     try:
         ## Conversation
         crew = Crew(
-            agents=[ontask_agent, collaborate_agent, uniqueness_agent, conversation_agent],
-            tasks=[ontask_task, collaborate_task, uniqueness_task, conversation_task],
+            agents=[ontask_agent, collaborate_agent, uniqueness_agent, conversation_agent, map_pickup_interaction_agent,
+                    map_drop_interaction_agent],
+            tasks=[ontask_task, collaborate_task, uniqueness_task, conversation_task, map_pickup_interaction_task, map_drop_interaction_task,
+                   ],
             process=Process.sequential,
             verbose=True
         )
@@ -291,6 +662,7 @@ def llm_request_crewai(
             'messages': messages,
             'tasks': str(player_obj.tasks),
             'my_bio': str(player_obj.bio),
+            'current_player_name': str(player_obj.name),
         })
 
         ## Task reflection
@@ -307,6 +679,7 @@ def llm_request_crewai(
             'messages': messages,
             'tasks': str(player_obj.tasks),
             'my_bio': str(player_obj.bio),
+            'current_player_name': str(player_obj.name),
         })
 
 
@@ -389,7 +762,60 @@ class Player:
         self.speed = 100
         self.strength = 100
         self.current_scroll = 0
+        self.inventory = None
+        self.world_obj = None
         load_conversation_history(self)
+
+    def pick_up(self, x, y, world_map):
+        self.inventory = world_map[y][x]
+        world_map[y][x] = 'rock'
+
+    def pick_up_inplace(self):
+        if self.world_obj is None:
+            print(f"Error: {self.name} has no reference to world object")
+            return None
+        if self.inventory is not None:
+            print(f"Error: {self.name} is already holding {self.inventory}")
+            return None
+        try:
+            current_item = self.world_obj[self.y][self.x]
+            if current_item == 'grass' or current_item == 'rock':
+                print(f"Error: {self.name} cannot pick up {current_item}")
+                return None
+            self.inventory = current_item
+            self.world_obj[self.y][self.x] = 'grass'
+            print(f"Success: {self.name} picked up {current_item}")
+            return current_item
+        except Exception as e:
+            print(f"Error during pickup: {str(e)}")
+            return None
+
+    def place(self, x, y, world_map):
+        if self.inventory is not None:
+            world_map[y][x] = self.inventory
+            self.inventory = None
+
+    def place_inplace(self):
+        if self.world_obj is None:
+            print(f"Error: {self.name} has no reference to world object")
+            return None
+        if self.inventory is None:
+            print(f"Error: {self.name} has no item to place")
+            return None
+        try:
+            current_spot = self.world_obj[self.y][self.x]
+            if current_spot != 'grass':
+                print(f"Error: {self.name} cannot place item on {current_spot}")
+                return None
+            item_to_place = self.inventory
+            self.world_obj[self.y][self.x] = self.inventory
+            self.inventory = None
+            print(f"Success: {self.name} placed {item_to_place}")
+            return item_to_place
+        except Exception as e:
+            print(f"Error during placement: {str(e)}")
+            return None
+
 
     def who_am_i_string(self):
         return f"I am {self.name}.My background is: {self.bio}.I am currently {self.tasks}."
@@ -427,22 +853,30 @@ def find_nearby_player(player, players):
 
 # Check if world.csv exists
 world_filename = 'world.csv'
+players = []
+player_lookup = {}
 
 if os.path.exists(world_filename):
     data = load_world_from_csv(world_filename)
     world = [row for row in data if row[0] not in ['player']]
     players_data = [row for row in data if row[0] == 'player']
 
-    players = []
     for player_data in players_data:
-        _, name, x, y, health, speed, strength, bio, tasks = player_data
+        _, name, x, y, health, speed, strength, bio, tasks, inventory_item = player_data
         player = Player(int(x), int(y), player_imgs[len(players)])
         player.name = name
         player.stats = {'Health': int(health), 'Speed': int(speed), 'Strength': int(strength)}
         player.bio = bio
         player.tasks = tasks
+        player.world_obj = world
+        player.inventory = inventory_item if inventory_item != "None" else None
         load_conversation_history(player)
         players.append(player)
+        player_lookup[to_upper_and_remove_spaces(player.name)] = player
+
+    print(f"\n\n{players_data}")
+    print(f"\n\n{player_lookup}")
+
 else:
     world = generate_world(GRID_SIZE)
     # Initialize players with unique positions
@@ -451,7 +885,9 @@ else:
     for i in range(NUM_PLAYERS):
         x, y = generate_unique_position(existing_positions)
         existing_positions.add((x, y))
-        players.append(Player(x, y, player_imgs[i]))
+        player = Player(x, y, player_imgs[i])
+        player.world_obj = world  # Set the world reference
+        players.append(player)
 
     save_world_to_csv(world_filename, world, players)
 
@@ -497,7 +933,16 @@ def move_inactive_players(players, active_idx):
 def draw_world(surface, world, players):
     for row in range(GRID_SIZE):
         for col in range(GRID_SIZE):
-            image = grass_img if world[row][col] == 'grass' else rock_img if world[row][col] == 'rock' else water_img
+            tile_type = world[row][col]
+            if tile_type == 'grass':
+                image = grass_img
+            elif tile_type == 'rock':
+                image = rock_img
+            elif tile_type == 'water':
+                image = water_img
+            else:
+                # For any other tile type, try to load its image or generate it
+                image = load_image(f'{tile_type}.png', (CELL_SIZE, CELL_SIZE))
             surface.blit(image, (col * CELL_SIZE, row * CELL_SIZE))
     for player in players:
         surface.blit(player.image, (player.y * CELL_SIZE, player.x * CELL_SIZE))
@@ -621,7 +1066,7 @@ sub_epoch = 30  # time increments
 idle_mod = 20 % sub_epoch  # update cycle for idle things
 idle_count = 0
 running = True
-paused = False
+paused = True
 selected_player = players[active_player_idx]
 
 # Create input boxes for player attributes
@@ -641,6 +1086,7 @@ while running:
         if pause_button.is_clicked(event):
             paused = not paused
             pause_button.text = "Unpause" if paused else "Pause"
+            save_world_to_csv(world_filename, world, players)
         if event.type == pygame.QUIT:
             save_world_to_csv(world_filename, world, players)
             for player in players:
