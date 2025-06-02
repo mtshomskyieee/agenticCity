@@ -924,21 +924,36 @@ class Player:
             print(f"Error during placement: {str(e)}")
             return None
 
+    def get_filtered_conversation_history(self):
+        """Filter out map-related messages from conversation history."""
+        filtered_responses = []
+        for response in self.all_responses:
+            # Skip map-related messages
+            if response.startswith("MAP:"):
+                continue
+            # Skip movement and inventory action messages
+            if any(keyword in response.lower() for keyword in ["moving", "picked up", "dropped", "holding", "inventory"]):
+                continue
+            filtered_responses.append(response)
+        return filtered_responses[-10:]  # Return only the last 10 conversation messages
 
     def who_am_i_string(self):
-        return f"I am {self.name}.My background is: {self.bio}.I am currently {self.tasks}."
+        inventory_status = f" I am holding {self.inventory}." if self.inventory else ""
+        return f"I am {self.name}. My background is: {self.bio}. I am currently {self.tasks}.{inventory_status}"
 
     def generate_conversation(self):
         self.current_conversation = self.who_am_i_string()
-        response_string = llm_request_crewai(self.all_responses, self.current_conversation, self)
+        filtered_history = self.get_filtered_conversation_history()
+        response_string = llm_request_crewai(filtered_history, self.current_conversation, self)
         self.all_responses.append(response_string)
         return response_string
 
     def respond_conversation(self, text, other_player_name):
         self.current_conversation = self.who_am_i_string()
-        self.current_conversation += f"I am talking to someone who is saying: {text}"
-        self.current_conversation += "In one sentence, what should I respond with"
-        response_string = llm_request_crewai(self.all_responses, self.current_conversation, self)
+        self.current_conversation += f" I am talking to someone who is saying: {text}"
+        self.current_conversation += " In one sentence, what should I respond with"
+        filtered_history = self.get_filtered_conversation_history()
+        response_string = llm_request_crewai(filtered_history, self.current_conversation, self)
         self.all_responses.append(response_string)
         print(f"{self.name} convo:{self.current_conversation}")
         print(f"{self.name} response:{response_string}")
