@@ -851,7 +851,7 @@ class Button:
 
 # Button setup
 button_width, button_height = 120, 40
-pause_button = Button(WIDTH - button_width - 10, HEIGHT - button_height - 10, button_width, button_height, "Pause")
+pause_button = Button(WIDTH - button_width - 10, HEIGHT - button_height - 10, button_width, button_height, "Unpause")
 autonomy_button = Button(WIDTH - button_width - 10, HEIGHT - (button_height * 2) - 20, button_width, button_height, "autonomy")
 
 
